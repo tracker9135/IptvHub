@@ -1,0 +1,18 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+
+# Node.js
+**/node_modules/
+
+# Pre-built frontend (rebuilt fresh in Docker Stage 1)
+src/IptvHub.Service/wwwroot/
+
+# Windows publish/installer artifacts
+installer/publish/
+installer/*.exe
+
+# IDE and VCS
+.vs/
+.git/
+*.user

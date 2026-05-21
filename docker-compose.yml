@@ -1,0 +1,19 @@
+services:
+  iptv-hub:
+    build: .
+    ports:
+      - "5000:5000"   # Management UI + embedded React app
+      - "8080:8080"   # Default IPTV streaming server
+      # If you add more IPTV servers in the UI on different ports, expose them here:
+      # - "8081:8081"
+    volumes:
+      - iptv-data:/app/data   # LiteDB database files (management.db, per-server DBs)
+      - iptv-logs:/app/logs   # NLog rotating log files
+    environment:
+      - IptvHub__ManagementApi__Host=http://0.0.0.0:5000
+      - ASPNETCORE_HTTP_PORTS=   # suppress the default 8080 set by the base image
+    restart: unless-stopped
+
+volumes:
+  iptv-data:
+  iptv-logs:

@@ -1,0 +1,30 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.nupkg
+*.snupkg
+project.lock.json
+
+# Published output
+installer/publish/
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+
+# Build artefacts
+installer/*.exe
+installer/*.zip
+
+# Logs and local data
+logs/
+data/
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,691 @@
+# IPTV Hub — User Guide
+
+## Table of Contents
+
+1. [Overview](#1-overview)
+2. [Installation](#2-installation)
+3. [Opening the Management UI](#3-opening-the-management-ui)
+4. [Adding IPTV Sources](#4-adding-iptv-sources)
+5. [Creating a Server](#5-creating-a-server)
+6. [Starting and Managing Servers](#6-starting-and-managing-servers)
+7. [Connecting Your Media Player](#7-connecting-your-media-player)
+8. [User Authentication](#8-user-authentication)
+9. [EPG (Electronic Programme Guide)](#9-epg-electronic-programme-guide)
+10. [EPG Manager](#10-epg-manager)
+11. [Image Proxy](#11-image-proxy)
+12. [Stream Proxy vs Redirect](#12-stream-proxy-vs-redirect)
+13. [Catchup Buffer](#13-catchup-buffer)
+14. [Push Notifications](#14-push-notifications)
+15. [Configuration Backup and Restore](#15-configuration-backup-and-restore)
+16. [Dashboard and Monitoring](#16-dashboard-and-monitoring)
+17. [Logs](#17-logs)
+18. [Troubleshooting](#18-troubleshooting)
+
+---
+
+## 1. Overview
+
+IPTV Hub is a self-hosted Windows service that aggregates multiple upstream IPTV providers — M3U playlists, Xtream Codes servers, Plex Media Server, Enigma2 receivers, and YouTube streams — and re-serves them as one or more unified, locally-hosted IPTV servers. Each server instance listens on its own port and exposes standard endpoints that any modern media player can connect to.
+
+### Source types
+
+IPTV Hub can pull content from six types of upstream sources, which can be mixed freely on any server:
+
+| Source type | What it provides |
+|---|---|
+| **M3U Playlist** | Live channels from any standard `.m3u` or `.m3u8` URL. Supports an optional XMLTV EPG URL |
+| **M3U Collection** | Multiple M3U playlist URLs merged into one source |
+| **Xtream Codes** | Live channels, VOD movies, and TV series from a compatible provider's API |
+| **Plex Media Server** | VOD movies and TV series (with full seasons, episodes, and per-episode thumbnails) from a local or remote Plex instance |
+| **Enigma2** | Live channels from a satellite receiver running Enigma2, imported by bouquet |
+| **YouTube** | Individual YouTube channels, live streams, or videos defined manually |
+
+### Player endpoints
+
+Each Hub server exposes three standard endpoint families that cover all major media players:
+
+| Endpoint | Format | Compatible players |
+|---|---|---|
+| `/get.php` | M3U playlist | VLC, Kodi, any M3U-capable player |
+| `/player_api.php`, `/panel_api.php` | Xtream Codes API | Tivimate, IPTV Smarters, GSE Smart IPTV, Kodi (IPTV Simple), and others |
+| `/xmltv.php`, `/epg.xml` | XMLTV EPG | Any player that accepts an XMLTV URL |
+
+The Xtream Codes API exposes all three content types: **live channels**, **VOD movies**, and **TV series** (with season and episode browsing).
+
+### Content management
+
+- **Automatic refresh** — each source is re-fetched on a configurable schedule (default 60 minutes). The server's content is updated without restarting.
+- **Link scanning** — after each refresh, Hub optionally tests every live channel URL and marks channels as working or dead. The Dashboard shows the live/dead breakdown per source group.
+- **Image proxy** — channel logos and VOD cover art are served through Hub and cached in the local database, so images appear even if the upstream URL changes or is temporarily unavailable.
+- **Stream proxy / redirect** — streams can be relayed through Hub (useful for hiding upstream URLs or bypassing player redirect restrictions) or redirected directly to the upstream server (lower resource usage).
+
+### Multi-server and access control
+
+- **Multiple server instances** — run several Hub servers simultaneously, each on its own port, with a completely independent source set, channel list, and user database. This lets you expose different content packages to different devices or users.
+- **Per-server user authentication** — each server has its own optional user list. If the list is empty, the server is open. Each user can have a maximum simultaneous connection limit.
+
+### Management UI
+
+A browser-based management interface (React SPA) provides:
+
+- **Dashboard** — at-a-glance view of running server count, total sources, total channels, and service health. Shows every channel with its live/dead status, grouped by source.
+- **Servers** — create, configure, start, stop, and refresh server instances. Edit source assignments, user lists, and stream settings.
+- **Sources** — add and manage upstream providers. For Plex, browse and select individual libraries; for Enigma2, browse and select bouquets.
+- **Logs** — view recent activity and locate log files on disk.
+
+### Key capabilities summary
+
+| Feature | Details |
+|---|---|
+| Source types | M3U, M3U Collection, Xtream Codes, Plex, Enigma2, YouTube |
+| Multiple server instances | Each on its own port with independent content and user lists |
+| M3U playlist endpoint | `/get.php` — compatible with VLC, Kodi, Tivimate, and others |
+| Xtream Codes API | Full `player_api.php` / `panel_api.php` — live, VOD, and series |
+| TV series support | Seasons, episodes, and per-episode thumbnails via Plex or Xtream Codes |
+| XMLTV EPG | `/xmltv.php` and `/epg.xml` endpoints |
+| Link scanning | Automatic working/dead status check per channel after each refresh |
+| Image proxy | Logos and cover art cached locally, served from Hub |
+| Stream proxy | Optional byte-relay through Hub; default is upstream redirect |
+| Per-server user auth | Username, password, and max connection limit per user |
+| Scheduled refresh | Configurable interval per source; no manual intervention needed |
+| Windows Service | Runs in the background; survives reboots without login |
+
+---
+
+## 2. Installation
+
+### Requirements
+
+- Windows 10 / Windows Server 2016 or later
+- [.NET 8 Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (or SDK if building from source)
+
+### Run from source (development)
+
+Open two terminal windows:
+
+**Terminal 1 — Backend:**
+```
+cd src\IptvHub.Service
+dotnet run
+```
+The management API starts on **http://localhost:5000**.
+
+**Terminal 2 — Frontend:**
+```
+cd src\IptvHub.Web
+npm install
+npm run dev
+```
+The UI is available at **http://localhost:5173**.
+
+### Install as a Windows Service (production)
+
+```powershell
+# Publish a self-contained executable
+cd src\IptvHub.Service
+dotnet publish -c Release -r win-x64 --self-contained true -o C:\IptvHub
+
+# Register with Windows Service Control Manager
+sc.exe create "IptvHub" binPath= "C:\IptvHub\IptvHub.Service.exe" start= auto DisplayName= "IPTV Hub"
+sc.exe description "IptvHub" "Self-hosted IPTV aggregation service"
+sc.exe start "IptvHub"
+```
+
+To uninstall:
+```powershell
+sc.exe stop "IptvHub"
+sc.exe delete "IptvHub"
+```
+
+### Data storage
+
+All data is stored under the `data\` folder next to the executable:
+
+```
+data\
+  management.db          ← server configs and source definitions
+  {server-id}.db         ← channel/VOD/series/EPG content (one per server)
+logs\
+  iptvhub-YYYY-MM-DD.log ← rolling daily log files (14 days retained)
+```
+
+---
+
+## 3. Opening the Management UI
+
+Navigate to **http://localhost:5173** (development) or **http://localhost:5000** (production, after building the frontend with `npm run build`).
+
+The sidebar has six sections:
+
+| Page | Purpose |
+|---|---|
+| **Dashboard** | Live overview of all server instances and system status |
+| **Servers** | Create, configure, start, stop, and refresh server instances |
+| **Sources** | Add and manage upstream IPTV providers |
+| **EPG** | EPG Manager — test XMLTV feeds, configure per-server EPG, and access the aggregated EPG endpoint |
+| **Logs** | Recent server activity and log file locations |
+| **Settings** | Export/import the full configuration backup |
+
+---
+
+## 4. Adding IPTV Sources
+
+A **source** is an upstream IPTV provider. Sources are shared across all server instances — you pick which sources to include when creating a server.
+
+Go to **Sources → Add Source**.
+
+### M3U Playlist source
+
+| Field | Description |
+|---|---|
+| **Name** | A friendly label (e.g. "Provider A") |
+| **Type** | M3U Playlist |
+| **M3U URL** | Direct URL to the `.m3u` or `.m3u8` playlist |
+| **EPG URL** | *(optional)* URL to an XMLTV file for programme guide data |
+| **Refresh Interval** | How often (in minutes) to re-fetch from the provider |
+
+> **Tip — Free M3U sources:** Click the **Browse free sources** button next to the URL field to open a searchable list of 110+ free public playlists from [iptv-org/iptv](https://github.com/iptv-org/iptv), grouped by world region. Clicking a country fills the URL field automatically.
+
+### M3U Collection source
+
+An M3U Collection groups multiple M3U playlist URLs that are fetched and merged into a single channel list.
+
+| Field | Description |
+|---|---|
+| **Name** | A friendly label |
+| **Type** | M3U Collection |
+| **URLs** | One or more M3U playlist URLs |
+| **Refresh Interval** | How often (in minutes) to re-fetch all URLs |
+
+> **Tip — Free M3U sources:** Click the **Browse free** button in the URLs section header to open the same iptv-org playlist picker. It operates as a multi-select — click entries to add or remove them from the URL list.
+
+### Xtream Codes source
+
+| Field | Description |
+|---|---|
+| **Name** | A friendly label |
+| **Type** | Xtream Codes |
+| **Base URL** | Provider URL including port, e.g. `http://provider.com:8080` |
+| **Username** | Your Xtream Codes username |
+| **Password** | Your Xtream Codes password |
+| **Refresh Interval** | How often (in minutes) to re-fetch content |
+
+### Plex Media Server source
+
+| Field | Description |
+|---|---|
+| **Name** | A friendly label (e.g. "My Plex") |
+| **Type** | Plex |
+| **Plex Server URL** | Base URL of your Plex Media Server, e.g. `http://192.168.1.10:32400` |
+| **Plex Token** | Your Plex API token (`X-Plex-Token`). See [how to find your token](https://support.plex.tv/articles/204059436) |
+| **Libraries** | After entering the URL and token, click **Browse Libraries** to pick which Plex libraries to import. Only selected libraries are synced |
+| **Refresh Interval** | How often (in minutes) to re-sync with Plex |
+
+Plex sources import:
+- **Movies** (VOD) — from any Plex movie library you select
+- **TV Series** — full seasons and episodes, with per-episode thumbnails, from any Plex TV library you select
+
+Content appears in Xtream Codes-compatible players under the VOD and Series sections, organised by Plex library name (e.g. "Movies", "TV").
+
+> **Important:** If you delete and re-create a Plex source, you must also go to **Servers → Edit** and reassign the new source to your server. Deleting a source removes it from the library but does not automatically update any server that referenced it. To avoid this, edit the existing source in place rather than deleting and recreating it.
+
+### Enigma2 receiver source
+
+| Field | Description |
+|---|---|
+| **Name** | A friendly label |
+| **Type** | Enigma2 |
+| **Receiver URL** | Web-interface URL of your Enigma2 receiver, e.g. `http://192.168.1.50` or `http://192.168.1.50:8080` |
+| **Username / Password** | Web-interface credentials (leave blank if authentication is disabled) |
+| **Stream Port** | Port used by the HTTP streamer on the receiver (default `8001`) |
+
+After saving, click **Browse Bouquets** to choose which channel bouquets to import.
+
+### Testing a source
+
+After saving, click the **test tube icon** next to the source. A green tick means the provider is reachable; a red cross means it failed (hover the icon to see the error).
+
+> **Tip:** Sources are fetched automatically on a schedule. You can force an immediate refresh by refreshing the server that uses the source (see Section 6).
+
+### Channel count badge
+
+Each source card displays a badge (e.g. **1,240 ch**) showing the number of live channels currently loaded from that source across all running servers. The count refreshes automatically every 30 seconds. If no servers are running, or no server references that source, the badge is not shown.
+
+---
+
+## 5. Creating a Server
+
+Go to **Servers → Add Server**.
+
+| Field | Description |
+|---|---|
+| **Name** | A label for this server instance |
+| **Bind Address** | IP address to listen on. Use `0.0.0.0` to accept connections from any network interface, or `127.0.0.1` for localhost only |
+| **Port** | The port your media player will connect to. Each server must use a unique port |
+| **Enable EPG** | Expose `/xmltv.php` and `/epg.xml` endpoints |
+| **Xtream API** | Expose `/player_api.php` and `/panel_api.php` for Xtream Codes-compatible players |
+| **Stream Proxy** | When enabled, streams are downloaded and relayed through the Hub. When disabled (default), the player is redirected (302) directly to the upstream stream URL |
+| **Webhook URL** | *(optional)* URL that receives HTTP POST alerts when a refresh fails or scan degrades — see [Section 14](#14-push-notifications) |
+| **Notify on refresh failure** | Send a webhook when a scheduled source refresh fails |
+| **Notify on scan degrade threshold** | Send a webhook when a scan finds this many or more dead channels (0 = disabled) |
+| **Enable Catchup Buffer** | Record a server-side HLS ring buffer for time-shift playback — requires Stream Proxy and ffmpeg — see [Section 13](#13-catchup-buffer) |
+| **Buffer duration (minutes)** | How many minutes of history to retain in the catchup buffer (default 60) |
+
+After creating the server, edit it to assign sources and add users (see Sections 4 and 8).
+
+> **Port planning example:**
+> - Server "UK Entertainment" → port 8080
+> - Server "Sports Package" → port 8081
+> - Server "Kids Content" → port 8082
+
+---
+
+## 6. Starting and Managing Servers
+
+From the **Servers** page, each server card has three action buttons:
+
+| Button | Action |
+|---|---|
+| ▶ **Start** | Starts the server; fetches content from all linked sources immediately |
+| ■ **Stop** | Stops the server; the port is released |
+| ↺ **Refresh** | Forces an immediate re-fetch of all linked sources without restarting |
+| 🗑 **Delete** | Stops the server (if running) and removes its configuration |
+
+### Status badges
+
+| Badge | Meaning |
+|---|---|
+| 🟢 Running | Server is listening and ready |
+| 🟡 Refreshing | Content is being fetched from upstream sources |
+| ⚫ Stopped | Server is not running |
+
+### Automatic refresh
+
+Each server refreshes its content automatically based on the shortest `Refresh Interval` set across all of its linked sources. For example, if Source A refreshes every 60 minutes and Source B every 30 minutes, the server will refresh every 30 minutes.
+
+---
+
+## 7. Connecting Your Media Player
+
+Replace `<host>`, `<port>`, `<user>`, and `<pass>` with your values. If the server has no users configured, you can omit the username and password or use any values.
+
+### M3U Playlist URL
+
+```
+http://<host>:<port>/get.php?username=<user>&password=<pass>&type=m3u_plus&output=ts
+```
+
+The `output` parameter accepts:
+- `ts` — standard MPEG-TS stream URLs (default)
+- `m3u8` — HLS stream URLs (same redirect, just a label difference)
+
+### Xtream Codes API
+
+Enter these three values in your player's "Xtream Codes" login screen:
+
+| Field | Value |
+|---|---|
+| Server / Host | `http://<host>:<port>` |
+| Username | `<user>` |
+| Password | `<pass>` |
+
+### EPG / XMLTV URL
+
+```
+http://<host>:<port>/xmltv.php?username=<user>&password=<pass>
+```
+
+or alternatively:
+
+```
+http://<host>:<port>/epg.xml
+```
+
+### Player-specific setup
+
+**Tivimate:**
+1. Add Playlist → Xtream Codes
+2. Enter Server URL, Username, Password
+3. Set EPG source to `http://<host>:<port>/xmltv.php?username=<user>&password=<pass>`
+
+**VLC:**
+1. Media → Open Network Stream
+2. Paste the M3U playlist URL
+
+**Kodi (PVR IPTV Simple Client):**
+1. Install "PVR IPTV Simple Client" add-on
+2. Set M3U playlist URL in the add-on settings
+3. Set XMLTV EPG URL
+
+**GSE Smart IPTV / IPTV Smarters:**
+Use the Xtream Codes login with the Host, Username, and Password fields.
+
+---
+
+## 8. User Authentication
+
+Each server has its own independent user list. If the user list is **empty**, the server is open — any player can connect without credentials.
+
+To add a user, edit the server and add entries to the Users section:
+
+| Field | Description |
+|---|---|
+| **Username** | Login name for the media player |
+| **Password** | Login password |
+| **Max Connections** | Maximum simultaneous streams for this user (0 = unlimited) |
+| **Enabled** | Toggle to temporarily disable a user without deleting them |
+
+> **Security note:** IPTV Hub does not use HTTPS by default. If you expose a server on a public network, consider placing it behind a reverse proxy (e.g. nginx or Caddy) with TLS.
+
+---
+
+## 9. EPG (Electronic Programme Guide)
+
+EPG data is fetched from:
+- **M3U sources:** the optional EPG URL field (must point to a valid XMLTV file)
+- **Xtream Codes sources:** the provider's built-in `xmltv.php` endpoint (fetched automatically)
+
+Channel matching works by `tvg-id`. The `tvg-id` tag in the M3U stream must match a `<channel id="...">` value in the XMLTV file.
+
+EPG endpoints exposed by each server:
+
+| Endpoint | Format |
+|---|---|
+| `/xmltv.php` | XMLTV (plain XML) |
+| `/epg.xml` | XMLTV (plain XML, same as above) |
+| `/epg.xml.gz` | XMLTV (gzip-compressed, for players that support it) |
+
+EPG is only available when **Enable EPG** is turned on for the server.
+
+---
+
+## 10. EPG Manager
+
+The **EPG** page in the management UI provides three capabilities:
+
+### Ad-hoc feed tester
+
+Paste any XMLTV URL (including `.gz` compressed feeds) and click **Test Feed** to verify it is reachable and see the programme and channel counts before committing it to a server.
+
+> **Browse free EPG sources:** Click the globe icon next to the URL field to open a searchable picker with 70+ curated free XMLTV feeds from epgshare01.online and mjh.nz, grouped by region.
+
+### Per-server EPG configuration
+
+Each server card on the EPG Manager page shows:
+
+- **Programme count** — number of EPG programme entries currently loaded in the server's database
+- **EPG Feeds** — additional XMLTV feed URLs to merge into the server's EPG on each refresh (supplements the EPG URLs already embedded in your M3U sources)
+- **Channel Maps** — manual overrides to map a playlist `tvg-id` to a different XMLTV channel ID when the provider IDs don't match
+
+### Aggregated EPG endpoint
+
+If you want a single EPG URL that covers **all** of your running IPTV Hub servers, use the management API's aggregated XMLTV endpoint:
+
+```
+http://localhost:5000/api/epg/xmltv
+```
+
+For gzip-compressed output (smaller download, supported by most players):
+
+```
+http://localhost:5000/api/epg/xmltv?gz=true
+```
+
+This endpoint:
+- Collects channels and programmes from every running server
+- De-duplicates channels by `tvg-id` across servers
+- Returns a single valid XMLTV document
+
+Use this URL in external media servers (Plex DVR, Emby, Jellyfin, Kodi) as a combined EPG source for all IPTV Hub content.
+
+---
+
+## 11. Image Proxy
+
+All channel logos and VOD cover images are served through the Hub rather than directly from upstream URLs. This means:
+
+- Logos appear even if the upstream URL changes or becomes temporarily unavailable (cached copy is served)
+- Images are cached in the server's LiteDB database after the first request
+- Cache entries are served with a 1-hour browser cache header
+
+Image URLs are generated automatically — you do not need to configure anything.
+
+---
+
+## 12. Stream Proxy vs Redirect
+
+The **Stream Proxy** setting on each server controls how live, timeshift, and VOD streams are delivered.
+
+| Mode | How it works | Best for |
+|---|---|---|
+| **Redirect** (default) | Hub returns HTTP 302 to the player, which connects directly to the upstream URL | Low CPU/bandwidth on the Hub machine; players that support redirects |
+| **Proxy** | Hub downloads the stream and forwards it to the player | Hiding upstream provider URLs; players or firewalls that do not follow redirects |
+
+> **Warning:** Stream Proxy significantly increases bandwidth and CPU usage on the machine running IPTV Hub. Only enable it if necessary.
+
+---
+
+## 13. Catchup Buffer
+
+The **Catchup Buffer** lets players seek backward in time on live channels — without any upstream provider support — by recording a local HLS ring buffer on the Hub machine.
+
+### Requirements
+
+- **Stream Proxy** must be enabled on the server (`EnableStreamProxy = true`).
+- **ffmpeg** must be installed and available on the system `PATH`. Quick install:
+  ```powershell
+  winget install ffmpeg
+  ```
+
+### How it works
+
+When both **Stream Proxy** and **Enable Catchup Buffer** are turned on for a server, IPTV Hub starts an ffmpeg process for each live channel that continuously writes HLS segments to a local ring buffer. Older segments beyond the configured duration are automatically deleted.
+
+Players can use the standard timeshift endpoint to play back within the retained window:
+
+```
+http://<host>:<port>/timeshift/<user>/<pass>/<duration-minutes>/<start-YYYY-MM-DD:HH-MM-SS>/<channel-id>
+```
+
+In Xtream Codes-compatible players, catch-up playback is triggered automatically when the player requests a past time slot.
+
+### Disk usage
+
+Typical IPTV bitrates are 2–8 Mbps. Plan for roughly:
+- 60 minutes × 4 Mbps × N channels ÷ 8 = **~1.8 GB per channel** for a 60-minute buffer at 4 Mbps
+
+Disable the buffer (or reduce duration) for channels you don't need catch-up on.
+
+### Enabling the catchup buffer
+
+1. Edit the server in **Servers → Edit**.
+2. Enable **Stream Proxy** (required).
+3. Enable **Catchup Buffer**.
+4. Set the **Buffer duration** in minutes.
+5. Save and restart the server.
+
+---
+
+## 14. Push Notifications
+
+IPTV Hub can notify you when notable events occur so you don't have to check the dashboard manually.
+
+### In-browser toast notifications
+
+The management UI maintains a persistent Server-Sent Events (SSE) connection to the Hub. Toast messages appear automatically in the top-right corner of the browser when:
+
+- A provider refresh completes or fails
+- A link scan finishes with degraded results (dead channel count above threshold)
+
+Toasts fade out after 5 seconds. If the SSE connection drops, the UI reconnects automatically.
+
+### Webhook notifications
+
+Each server can POST alerts to an external URL when events occur. Configure in **Servers → Edit**:
+
+| Field | Description |
+|---|---|
+| **Webhook URL** | The URL to receive the POST. Must be `http://` or `https://`. Loopback/private addresses are rejected |
+| **Notify on refresh failure** | Fire webhook when a scheduled source refresh fails |
+| **Notify on scan degrade threshold** | Fire webhook when a scan reports ≥ N dead channels (0 = disabled) |
+
+The webhook payload is a JSON object:
+
+```json
+{
+  "event": "refresh_failed",
+  "serverId": "abc123",
+  "serverName": "My Server",
+  "detail": "Source 'Provider A' failed: connection timed out",
+  "timestamp": "2026-05-21T12:00:00Z"
+}
+```
+
+`event` is one of `refresh_failed` or `scan_degraded`.
+
+### Webhook integration examples
+
+- **ntfy.sh** — use `https://ntfy.sh/your-topic` as the URL and subscribe in the ntfy app
+- **n8n / Make / Zapier** — paste the webhook trigger URL from your workflow
+- **Home Assistant** — use a `/api/webhook/<id>` URL from your HA instance
+
+---
+
+## 15. Configuration Backup and Restore
+
+The **Settings** page (sidebar → Settings) lets you export and import the complete IPTV Hub configuration.
+
+### Export
+
+Click **Export Configuration** to download a `iptvhub-backup-<timestamp>.json` file. The archive contains:
+
+- All **server** configurations (ports, settings, users, EPG feeds, channel maps)
+- All **source** definitions (URLs, credentials, refresh intervals)
+- All **channel overrides**
+
+Store the backup file in a safe location before upgrades or migrations.
+
+### Restore
+
+Click **Restore Configuration**, select a previously exported `.json` file, and confirm the prompt. The restore:
+
+- **Completely replaces** all existing servers, sources, and overrides in the database
+- Does **not** restart running servers — you must stop and restart them (or restart the Windows Service) for the restored configuration to take effect
+
+> **Warning:** Restore is destructive — current configuration is overwritten. Export first if you want to preserve the current state.
+
+### Direct API access
+
+| Method | URL | Description |
+|---|---|---|
+| `GET` | `http://localhost:5000/api/backup` | Download the JSON archive |
+| `POST` | `http://localhost:5000/api/backup/restore` | Restore from a JSON body |
+
+---
+
+## 16. Dashboard and Monitoring
+
+The **Dashboard** page shows:
+
+- **Running Servers / Total Servers** — how many of your configured servers are currently active
+- **Total Sources** — number of upstream providers configured
+- **Per-server cards** — each card shows the server's name, address:port, current status badge, last refresh time, and any error messages
+
+The dashboard auto-refreshes every 5 seconds.
+
+---
+
+## 17. Logs
+
+### In the UI
+
+The **Logs** page shows per-server activity: last refresh time, current status, and the most recent error (if any).
+
+### Log files
+
+Structured logs are written to the `logs\` folder next to the service executable:
+
+```
+logs\iptvhub-2026-05-19.log
+logs\iptvhub-2026-05-20.log
+...
+```
+
+- Rotated daily at midnight
+- Retained for **14 days**, then automatically deleted
+- Log level defaults to `Info` for most components and `Warn` for Microsoft internals
+
+To increase log verbosity for troubleshooting, edit `appsettings.json` and change the `minLevel` for the `own` rule to `Debug`, then restart the service.
+
+---
+
+## 18. Troubleshooting
+
+### Source won't save — Create button does nothing
+
+The backend API may be unreachable. Check:
+1. The backend is running (`dotnet run` in `src\IptvHub.Service`)
+2. Open `http://localhost:5000/api/sources` in a browser — you should see `[]`
+
+### Source test fails
+
+- Verify the URL is accessible from the machine running IPTV Hub (not just your browser)
+- For M3U: paste the URL directly into a browser and confirm it downloads a playlist
+- For Xtream Codes: confirm the Base URL includes the port (e.g. `http://provider.com:8080`, not just `http://provider.com`)
+
+### Server starts but player cannot connect
+
+- Check the **Bind Address** — `127.0.0.1` only accepts local connections; use `0.0.0.0` for network access
+- Confirm the port is not blocked by Windows Firewall:
+  ```powershell
+  New-NetFirewallRule -DisplayName "IPTV Hub Port 8080" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+  ```
+- Check the Logs page for any error shown on the server card
+
+### Channels are missing or outdated
+
+Click **Refresh** on the server card to force an immediate re-fetch from all linked sources. If the refresh fails, the error will appear on the server card and in the log file.
+
+### EPG not working in player
+
+- Confirm **Enable EPG** is turned on for the server
+- Verify the EPG URL is set on your M3U source (or that the Xtream Codes provider includes EPG data)
+- Check that the `tvg-id` values in the playlist match channel IDs in the XMLTV file — mismatches are common between providers
+
+### Service won't start after reboot (Windows Service install)
+
+Check the Windows Event Log:
+```powershell
+Get-EventLog -LogName Application -Source "IptvHub" -Newest 20
+```
+
+Common causes: port already in use, missing `data\` directory permissions, or the .NET 8 runtime not installed system-wide.
+
+### Port already in use
+
+```powershell
+# Find what is using the port
+netstat -ano | findstr ":8080"
+
+# Kill the process by PID
+Stop-Process -Id <PID> -Force
+```
+
+### Plex VOD or series disappeared after deleting and re-adding the source
+
+When you delete a source and create a new one, the new source gets a different ID. Any server that referenced the old source ID will stop loading Plex content, resulting in 0 VOD and 0 series after the next refresh.
+
+**Fix:**
+1. Go to **Servers → Edit** for the affected server
+2. Open the **Sources** section — the old (deleted) source will no longer appear in the available list
+3. Select the new Plex source you created
+4. Save — the server restarts and re-imports all Plex content
+
+**Prevention:** Instead of deleting and re-adding, edit the existing Plex source in place to update the URL, token, or library selection. This preserves the source ID and the server linkage.
+
+### Plex series show in the player but episode images are missing
+
+Episode thumbnails are direct Plex URLs authenticated with your token. If thumbnails are not loading:
+
+- Confirm the **Plex Server URL** in the source is reachable from the machine running IPTV Hub (not just your player device)
+- If your Plex server URL is a LAN address (e.g. `192.168.1.x`) and your player is on a different network, thumbnail URLs will be inaccessible from the player. Use Plex's remote access URL instead, or enable **Stream Proxy** on the IPTV Hub server
