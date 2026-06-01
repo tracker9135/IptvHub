@@ -3,16 +3,12 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /repo
 
-# Copy manifests first for layer caching
 COPY src/IptvHub.Web/package.json src/IptvHub.Web/package-lock.json \
      src/IptvHub.Web/
 
-# Install dependencies
 WORKDIR /repo/src/IptvHub.Web
 RUN npm ci
 
-# Copy source and build
-# Vite outDir "../IptvHub.Service/wwwroot" → /repo/src/IptvHub.Service/wwwroot
 COPY src/IptvHub.Web/ .
 RUN npm run build
 
@@ -22,58 +18,44 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-builder
 
 WORKDIR /repo
 
-# Copy solution + project file first for NuGet restore layer caching
 COPY IptvHub.sln .
 COPY src/IptvHub.Service/IptvHub.Service.csproj src/IptvHub.Service/
 RUN dotnet restore src/IptvHub.Service/IptvHub.Service.csproj
 
-# Copy backend source
 COPY src/IptvHub.Service/ src/IptvHub.Service/
-
-# Overlay the frontend build from Stage 1
 COPY --from=frontend-builder /repo/src/IptvHub.Service/wwwroot \
      src/IptvHub.Service/wwwroot/
 
-# Publish
 RUN dotnet publish src/IptvHub.Service/IptvHub.Service.csproj \
     -c Release \
     -o /out \
     --no-restore
 
 
-# ── Stage 3: Runtime image ─────────────────────────────────────────────────────
+# ── Stage 3: Runtime image (media tools included) ─────────────────────────────
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 
 WORKDIR /app
 
 RUN apt-get update \
-     && apt-get install -y --no-install-recommends \
-          curl \
-          ffmpeg \
-          python3 \
-     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
-     && chmod +x /usr/local/bin/yt-dlp \
-     && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends curl ffmpeg python3 python3-pip ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install yt-dlp in a distro-agnostic way via pip
+RUN python3 -m pip install --no-cache-dir --break-system-packages yt-dlp
 
 COPY --from=backend-builder /out .
 
 RUN mkdir -p /app/data /app/logs \
-     && chmod -R 0777 /app/data /app/logs
+    && chmod -R 0777 /app/data /app/logs
 
-# Management UI / REST API
 EXPOSE 5000
-
-# Default IPTV streaming server.
-# If you configure additional IPTV servers on different ports in the UI,
-# add matching EXPOSE lines here and port mappings in docker-compose.yml.
 EXPOSE 8080
 
-# Override appsettings.json "Host: http://localhost:5000" so Kestrel binds
-# to all interfaces and is reachable from outside the container.
 ENV IptvHub__ManagementApi__Host=http://0.0.0.0:5000
 ENV IptvHub__Data__CompactWhenLargerThanMb=0
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
-     CMD curl -fsS http://127.0.0.1:5000/ || exit 1
+    CMD curl -fsS http://127.0.0.1:5000/ || exit 1
 
 ENTRYPOINT ["dotnet", "IptvHub.Service.dll"]

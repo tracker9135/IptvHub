@@ -1,6 +1,6 @@
 ﻿# IPTV Hub — Developer Guide
 
-**Version:** 1.0.2  
+**Version:** 1.1.0  
 **Target Framework:** .NET 8 (net8.0-windows)  
 **Language:** C# 12 (implicit usings, nullable enabled)  
 **Frontend:** React 18 + TypeScript (Vite 5)
@@ -28,6 +28,8 @@
 ## 1. Overview
 
 IPTV Hub is a self-hosted Windows service that aggregates multiple upstream IPTV sources — M3U playlists, M3U collections, Xtream Codes servers, Plex Media Server, Enigma2 receivers, and YouTube streams — and re-serves them as one or more locally-hosted IPTV servers.
+
+For a consolidated endpoint reference (management + player-facing APIs), see **[IptvHub_API.md](IptvHub_API.md)**.
 
 Two processes cooperate:
 
@@ -589,6 +591,26 @@ sc.exe start "IptvHub"
 ---
 
 ## 13. Logging
+
+---
+
+## 14. Threading Model
+
+The runtime mixes async coordination and lock-based data protection by service. Keep this map up to date when adding concurrency-sensitive code.
+
+| Service / Component | Primitive | Protected Scope | Notes |
+|---|---|---|---|
+| `ServerManager` | `SemaphoreSlim(1,1)` | Host lifecycle mutations (`start/stop/refresh`) | Single mutation lane for `_hosts` dictionary and per-server host transitions. |
+| `HubDatabase` | `ReaderWriterLockSlim` | LiteDB read/write critical sections for per-server content | Bulk replace operations run under write lock; stream/read paths use read lock. |
+| `StreamHandler` | `ConcurrentDictionary` + CAS (`TryUpdate`) | Active source/user/session counters and session registries | Per-user/source limits and active-session snapshots are lock-free and contention-safe. |
+| `ManagementSessionStore` | `ConcurrentDictionary` + background cleanup worker | Session token lifecycle and expiration cleanup | Sliding-expiry updates use compare-and-swap; cleanup loop is cancellation-aware. |
+| `SseService` | `ConcurrentDictionary` | Subscriber registry | Subscription/unsubscription is idempotent and keyed by client id. |
+
+Concurrency guardrails:
+
+- Do not mutate shared collections outside their owning primitive.
+- Prefer bounded background loops with `CancellationToken` propagation.
+- For new external I/O loops, use `ExternalIoPolicy` and keep retry behavior idempotency-aware.
 
 NLog is configured in `appsettings.json` under the `NLog` key.
 

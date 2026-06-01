@@ -256,23 +256,7 @@ sudo nano /volume1/docker/iptv-hub/project/docker-compose.yml
 Paste the following content (use `Ctrl+Shift+V` to paste in most SSH clients):
 
 ```yaml
-services:
-  iptv-hub:
-    image: iptv-hub:latest          # or <yourusername>/iptv-hub:latest if pulled from Docker Hub
-    container_name: iptv-hub
-    ports:
-      - "5055:5000"   # Management UI â€” change 5055 to any free host port
-      - "8080:8080"   # Default IPTV streaming server
-      # Add more ports here if you configure additional IPTV servers in the UI:
-      # - "8081:8081"
-      # - "8082:8082"
-    volumes:
-      - /volume1/docker/iptv-hub/data:/app/data
-      - /volume1/docker/iptv-hub/logs:/app/logs
-    restart: unless-stopped
-    # Optional: limit resource usage (recommended â€” see Resource Limits section)
-    mem_limit: 512m
-    cpus: "1.0"
+g
 ```
 
 Save and exit: press `Ctrl+X`, then `Y`, then `Enter`.
@@ -321,8 +305,57 @@ Click **Done**. The container starts automatically.
 
 ---
 
-## Step 4 â€” Open the firewall port (if applicable)
+### Method C â€" SSH `docker run` (simplest, recommended for updates)
 
+If SSH is enabled on the NAS, this single command replaces both the GUI wizard and the compose project. Run it once after importing each new tar:
+
+```bash
+docker run -d \
+    --name iptv-hub \
+    --restart unless-stopped \
+    -p 5045:5000 \
+    -p 8070:8070 \
+    -p 8071:8071 \
+    -p 8072:8072 \
+    -p 8073:8073 \
+    -v /volume1/docker/iptv-hub/data:/app/data \
+    -v /volume1/docker/iptv-hub/logs:/app/logs \
+    iptv-hub:latest
+```
+
+Port mapping summary for this command:
+
+| Host port | Container port | Purpose |
+|---|---|---|
+| 5045 | 5000 | Management UI |
+| 8070â€"8073 | 8070â€"8073 | IPTV streaming servers (set matching ports in the UI) |
+
+To **update** to a new image (stop the old container, load the new tar, start fresh):
+
+```bash
+# Stop and remove the old container (data is safe — stored in the volume)
+docker stop iptv-hub && docker rm iptv-hub
+
+# (Now import the new iptv-hub.tar in Container Manager → Image → Add → Import from file)
+
+# Start the new container with the same command as above
+docker run -d \
+    --name iptv-hub \
+    --restart unless-stopped \
+    -p 5045:5000 \
+    -p 8070:8070 \
+    -p 8071:8071 \
+    -p 8072:8072 \
+    -p 8073:8073 \
+    -v /volume1/docker/iptv-hub/data:/app/data \
+    -v /volume1/docker/iptv-hub/logs:/app/logs \
+    iptv-hub:latest
+```
+
+> **First run:** On a brand-new installation the `/volume1/docker/iptv-hub/data` folder is empty, so the app shows a **"This is your first time opening IPTV Hub"** screen. This is normal â€" set an admin password, then add your sources and servers. On all subsequent updates your configuration is preserved automatically via the volume mount.
+
+---
+## Step 4 â€" Open the firewall port (if applicable)
 If your Synology firewall is enabled (**Control Panel â†’ Security â†’ Firewall** â€” if the toggle is on, it's active):
 
 1. **Control Panel** â†’ **Security** â†’ **Firewall**
@@ -437,7 +470,42 @@ http://<NAS-IP>:8080/get.php?type=m3u_plus
    - **Projects:** Container Manager â†’ Project â†’ iptv-hub â†’ Stop â†’ Start
    - **Method B:** Container Manager â†’ Container â†’ select `iptv-hub` â†’ Action â†’ Stop â†’ then Start
 
-> **Your data is safe.** The database and logs are stored in the host volume (`/volume1/docker/iptv-hub/data` and `logs`) and are not affected by stopping, updating, or even deleting the container.
+> **Your data is safe** â€" *provided you have volume mounts configured* (Step 2 + Step 3 above). The database files live on the host at `/volume1/docker/iptv-hub/data`, not inside the container, so they survive image updates, container restarts, and container deletion.
+
+> âš ï¸ **No volume mounts = data inside the container.** If you skipped Step 2 or the Volume Settings tab in Step 3, your database is stored inside the containerâ€™s writable layer. Importing a new image causes Container Manager to recreate the container from the new image, which wipes that internal storage. See **Recovering data after an accidental wipe** below if this happened to you.
+
+### Recovering data after an accidental wipe
+
+When Container Manager recreates a container it usually leaves the *old* container in a stopped state â€" its internal filesystem is still intact until it is explicitly deleted.
+
+1. SSH into the NAS:
+   ```bash
+   ssh admin@<NAS-IP>
+   ```
+2. List all containers (including stopped ones):
+   ```bash
+   sudo docker ps -a
+   ```
+   Look for a container whose image is listed as `iptv-hub:latest` or a hash (`sha256:â€¦`). It will have an **Exited** status and a name like `iptv-hub` or `iptv-hub_1`.
+3. Copy the data out of the old stopped container:
+   ```bash
+   sudo docker cp <old-container-name-or-id>:/app/data /volume1/docker/iptv-hub/data
+   ```
+   Confirm the files are there:
+   ```bash
+   ls /volume1/docker/iptv-hub/data
+   # Should list: management.db  <server-id>.db  images/ â€¦
+   ```
+4. Stop and delete the current (empty) container in Container Manager.
+5. Recreate the container **with volume mounts** as described in Step 3 (Volume Settings tab), mapping `/app/data` â†' `/volume1/docker/iptv-hub/data`. Start it â€" your configuration and channel data will be restored.
+6. Once confirmed working, delete the old stopped container:
+   ```bash
+   sudo docker rm <old-container-name-or-id>
+   ```
+
+If no old stopped container is visible, the data was not recoverable from the container layer and configuration will need to be re-entered manually.
+
+---
 
 ### If using Docker Hub (Option B)
 

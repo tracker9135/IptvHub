@@ -1,7 +1,7 @@
 ﻿# IPTV Hub — Operational Specification
 
 **Product:** IPTV Hub  
-**Version:** 1.0.2  
+**Version:** 1.1.0  
 **Assembly:** `IptvHub.Service.exe`  
 **Target Framework:** .NET 8 (net8.0, ASP.NET Core)
 
@@ -185,7 +185,7 @@ No parameters. Returns:
 ```json
 {
   "service": "IptvHub",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "serverTime": "2026-05-20T10:00:00Z",
   "totalServers": 2,
   "runningServers": 1,

@@ -1,5 +1,7 @@
 # IPTV Hub — User Guide
 
+**Version 1.1.2** — Updated 2026-06-01
+
 ## Table of Contents
 
 1. [Overview](#1-overview)
@@ -18,8 +20,10 @@
 14. [Push Notifications](#14-push-notifications)
 15. [Configuration Backup and Restore](#15-configuration-backup-and-restore)
 16. [Dashboard and Monitoring](#16-dashboard-and-monitoring)
-17. [Logs](#17-logs)
-18. [Troubleshooting](#18-troubleshooting)
+17. [Operational Jobs](#17-operational-jobs)
+18. [Search](#18-search)
+19. [Logs](#19-logs)
+20. [Troubleshooting](#20-troubleshooting)
 
 ---
 
@@ -27,9 +31,11 @@
 
 IPTV Hub is a self-hosted Windows service that aggregates multiple upstream IPTV providers — M3U playlists, Xtream Codes servers, Plex Media Server, Enigma2 receivers, and YouTube streams — and re-serves them as one or more unified, locally-hosted IPTV servers. Each server instance listens on its own port and exposes standard endpoints that any modern media player can connect to.
 
+For endpoint-level technical reference, see **[IptvHub_API.md](IptvHub_API.md)**.
+
 ### Source types
 
-IPTV Hub can pull content from six types of upstream sources, which can be mixed freely on any server:
+IPTV Hub can pull content from eight types of upstream sources, which can be mixed freely on any server:
 
 | Source type | What it provides |
 |---|---|
@@ -39,6 +45,8 @@ IPTV Hub can pull content from six types of upstream sources, which can be mixed
 | **Plex Media Server** | VOD movies and TV series (with full seasons, episodes, and per-episode thumbnails) from a local or remote Plex instance |
 | **Enigma2** | Live channels from a satellite receiver running Enigma2, imported by bouquet |
 | **YouTube** | Individual YouTube channels, live streams, or videos defined manually |
+| **HDHomeRun** | Live OTA/cable channels from an HDHomeRun network tuner device |
+| **SAT>IP** | Live channels from a SAT>IP network tuner device (Octopus Net, Telestar, etc.) |
 
 ### Player endpoints
 
@@ -71,13 +79,19 @@ A browser-based management interface (React SPA) provides:
 - **Dashboard** — at-a-glance view of running server count, total sources, total channels, and service health. Shows every channel with its live/dead status, grouped by source.
 - **Servers** — create, configure, start, stop, and refresh server instances. Edit source assignments, user lists, and stream settings.
 - **Sources** — add and manage upstream providers. For Plex, browse and select individual libraries; for Enigma2, browse and select bouquets.
+- **Channel Manager** — inspect and control live channel inventory (including overrides and bulk actions).
+- **Playlist Manager** — manage custom playlists and ordering.
+- **EPG Import** — validate/import EPG mapping inputs.
+- **Jobs** — observe scheduler/queue activity and operational job outcomes.
+- **Search** — query live/VOD/series/EPG inventory across loaded providers.
+- **Player** — sender page to launch playback handoff actions.
 - **Logs** — view recent activity and locate log files on disk.
 
 ### Key capabilities summary
 
 | Feature | Details |
 |---|---|
-| Source types | M3U, M3U Collection, Xtream Codes, Plex, Enigma2, YouTube |
+| Source types | M3U, M3U Collection, Xtream Codes, Plex, Enigma2, YouTube, HDHomeRun, SAT>IP |
 | Multiple server instances | Each on its own port with independent content and user lists |
 | M3U playlist endpoint | `/get.php` — compatible with VLC, Kodi, Tivimate, and others |
 | Xtream Codes API | Full `player_api.php` / `panel_api.php` — live, VOD, and series |
@@ -155,14 +169,20 @@ logs\
 
 Navigate to **http://localhost:5173** (development) or **http://localhost:5000** (production, after building the frontend with `npm run build`).
 
-The sidebar has six sections:
+The sidebar includes operational sections for end-to-end management:
 
 | Page | Purpose |
 |---|---|
 | **Dashboard** | Live overview of all server instances and system status |
 | **Servers** | Create, configure, start, stop, and refresh server instances |
 | **Sources** | Add and manage upstream IPTV providers |
+| **Channel Manager** | Browse/filter channel inventory and apply channel-level actions |
+| **Playlist Manager** | Build and order custom playlist groups |
+| **EPG Import** | Validate/import EPG mapping data |
 | **EPG** | EPG Manager — test XMLTV feeds, configure per-server EPG, and access the aggregated EPG endpoint |
+| **Jobs** | Scheduler queue and background processing telemetry |
+| **Search** | Unified search across channels, VOD, series, and programmes |
+| **Player** | Sender route for handoff and remote playback initiation |
 | **Logs** | Recent server activity and log file locations |
 | **Settings** | Export/import the full configuration backup |
 
@@ -240,6 +260,57 @@ Content appears in Xtream Codes-compatible players under the VOD and Series sect
 | **Stream Port** | Port used by the HTTP streamer on the receiver (default `8001`) |
 
 After saving, click **Browse Bouquets** to choose which channel bouquets to import.
+
+### HDHomeRun source
+
+HDHomeRun network tuners (HDHR4, HDHR5, HDHR Flex series, etc.) expose a JSON lineup API that IPTV Hub uses to import OTA or cable channels directly.
+
+| Field | Description |
+|---|---|
+| **Name** | A friendly label (e.g. "HDHomeRun Living Room") |
+| **Type** | HDHomeRun |
+| **Device URL** | Base URL of the device, e.g. `http://192.168.1.100` |
+| **Refresh Interval** | How often (in minutes) to re-fetch the channel lineup |
+
+IPTV Hub fetches `/lineup.json` from the device to build the channel list. Channel names are automatically prefixed with their OTA guide number and zero-padded so they sort correctly (e.g. `05.1 WEWS-HD`, `10.2 MeTV`).
+
+Click **Test** to ping the device's `/lineup_status.json` before saving. The test returns the tuner model, firmware version, and channel count.
+
+> **Note:** HDHomeRun does not provide built-in EPG data. To populate the EPG guide for these channels, add an XMLTV feed on the EPG Manager page and map channels using the Channel Maps section.
+
+### SAT>IP source
+
+SAT>IP is a network streaming protocol used by satellite and cable tuner devices (Octopus Net, HDHR ATSC3, Telestar, Megasat, etc.).
+
+| Field | Description |
+|---|---|
+| **Name** | A friendly label (e.g. "Octopus Net") |
+| **Type** | SAT>IP |
+| **Device URL** | Base URL of the SAT>IP device, e.g. `http://192.168.1.101` |
+| **Channel List Path** | *(optional)* Path to the channel list M3U on the device. Leave blank to auto-detect. |
+| **Refresh Interval** | How often (in minutes) to re-fetch the channel list |
+
+When no **Channel List Path** is specified, IPTV Hub probes these well-known paths in order and uses the first one that responds:
+`/channellist.m3u`, `/playlist.m3u`, `/channels.m3u`, `/api/channels.m3u`, `/stream/channels.m3u`
+
+Device information (friendly name, capabilities) is read from the UPnP device description at `/desc.xml`. RTSP stream URLs returned by the device are automatically rewritten to HTTP for compatibility with standard media players.
+
+Click **Test** to connect to the device and retrieve its friendly name and SAT>IP capabilities.
+
+### Common source settings
+
+The following settings are available on all source types:
+
+| Field | Description |
+|---|---|
+| **Refresh Interval (minutes)** | How often this source is re-fetched |
+| **Max Concurrent Streams** | Source-level stream cap. `0` means unlimited |
+| **Stream Proxy Mode** | Per-source delivery override: **Inherit**, **Force On**, or **Force Off** |
+
+`Stream Proxy Mode` works together with the server's **Stream Proxy** toggle:
+- **Inherit**: use the server setting
+- **Force On**: always proxy this source
+- **Force Off**: always redirect this source
 
 ### Testing a source
 
@@ -417,6 +488,21 @@ Each server card on the EPG Manager page shows:
 - **EPG Feeds** — additional XMLTV feed URLs to merge into the server's EPG on each refresh (supplements the EPG URLs already embedded in your M3U sources)
 - **Channel Maps** — manual overrides to map a playlist `tvg-id` to a different XMLTV channel ID when the provider IDs don't match
 
+#### EPG feed minimum download interval
+
+Each EPG feed has an optional **Minimum Download Interval** setting (in minutes). When set, automatic scheduled refreshes skip downloading that feed until the interval has elapsed since the last successful download — useful for large feeds that change infrequently.
+
+> **Manual downloads always bypass the minimum interval.** Clicking the download button on a feed in the EPG Manager always downloads immediately, regardless of the cooldown. Use this to force a fresh download after adding new channel maps or when troubleshooting.
+
+#### EPG timeline guide
+
+The lower section of the EPG page shows an interactive programme guide timeline:
+
+- Select a running server and date from the controls at the top
+- Channel rows and programme blocks are loaded lazily as you scroll
+- If the guide appears empty when first opened, it will populate automatically within a few seconds once the server's startup refresh completes
+- Click a programme block to see its description and schedule a recording
+
 ### Aggregated EPG endpoint
 
 If you want a single EPG URL that covers **all** of your running IPTV Hub servers, use the management API's aggregated XMLTV endpoint:
@@ -454,12 +540,26 @@ Image URLs are generated automatically — you do not need to configure anything
 
 ## 12. Stream Proxy vs Redirect
 
-The **Stream Proxy** setting on each server controls how live, timeshift, and VOD streams are delivered.
+Stream delivery now has two layers:
+
+1. **Server default**: the **Stream Proxy** toggle on the server
+2. **Optional source override**: each source's **Stream Proxy Mode**
+
+This applies to live, VOD, and series playback.
 
 | Mode | How it works | Best for |
 |---|---|---|
 | **Redirect** (default) | Hub returns HTTP 302 to the player, which connects directly to the upstream URL | Low CPU/bandwidth on the Hub machine; players that support redirects |
 | **Proxy** | Hub downloads the stream and forwards it to the player | Hiding upstream provider URLs; players or firewalls that do not follow redirects |
+
+### Effective behavior matrix
+
+| Server Stream Proxy | Source Stream Proxy Mode | Effective behavior |
+|---|---|---|
+| Off | Inherit | Redirect |
+| On | Inherit | Proxy |
+| Off or On | Force On | Proxy |
+| Off or On | Force Off | Redirect |
 
 > **Warning:** Stream Proxy significantly increases bandwidth and CPU usage on the machine running IPTV Hub. Only enable it if necessary.
 
@@ -516,6 +616,7 @@ The management UI maintains a persistent Server-Sent Events (SSE) connection to 
 
 - A provider refresh completes or fails
 - A link scan finishes with degraded results (dead channel count above threshold)
+- Scheduler pressure is detected or resolved (`scheduler_pressure`, `scheduler_pressure_resolved`)
 
 Toasts fade out after 5 seconds. If the SSE connection drops, the UI reconnects automatically.
 
@@ -589,13 +690,38 @@ The **Dashboard** page shows:
 
 - **Running Servers / Total Servers** — how many of your configured servers are currently active
 - **Total Sources** — number of upstream providers configured
-- **Per-server cards** — each card shows the server's name, address:port, current status badge, last refresh time, and any error messages
+- **Per-server cards** — each card shows the server's name, address:port, status badge, QoS profile, source count, and refresh/error status
+- **Scheduler queue health** — running/queued/completed/failed/dropped summaries with backlog warnings when pressure thresholds are exceeded
+- **Health alerts** — ffmpeg capability gaps, snapshot staleness, and service-worker control warnings
+- **Active streams and device sessions** — real-time playback/session visibility
+- **Operational widgets** — recording rules, skip markers, watch history, and EPG drift insights
 
 The dashboard auto-refreshes every 5 seconds.
 
 ---
 
-## 17. Logs
+## 17. Operational Jobs
+
+The **Jobs** page provides operational visibility into scheduled/background work and queue activity.
+
+Use it to:
+
+- Confirm whether refresh/scan work is currently active or idle
+- Identify stale/slow queue items using age thresholds
+- Verify scheduler recovery after transient failures
+
+---
+
+## 18. Search
+
+The **Search** page and sidebar omnibox provide a unified query surface over loaded catalog data.
+
+- Searches can return live channels, VOD movies, series, and EPG programmes depending on indexed data.
+- Result quality depends on currently loaded server/provider content.
+
+---
+
+## 19. Logs
 
 ### In the UI
 
@@ -619,13 +745,15 @@ To increase log verbosity for troubleshooting, edit `appsettings.json` and chang
 
 ---
 
-## 18. Troubleshooting
+## 20. Troubleshooting
 
 ### Source won't save — Create button does nothing
 
 The backend API may be unreachable. Check:
 1. The backend is running (`dotnet run` in `src\IptvHub.Service`)
-2. Open `http://localhost:5000/api/sources` in a browser — you should see `[]`
+2. Open `http://localhost:5000/` in a browser — the UI should load
+
+If API probing is needed, use an authenticated browser session. Some management endpoints return `401 Unauthorized` when no valid session cookie is present.
 
 ### Source test fails
 
@@ -651,6 +779,27 @@ Click **Refresh** on the server card to force an immediate re-fetch from all lin
 - Confirm **Enable EPG** is turned on for the server
 - Verify the EPG URL is set on your M3U source (or that the Xtream Codes provider includes EPG data)
 - Check that the `tvg-id` values in the playlist match channel IDs in the XMLTV file — mismatches are common between providers
+
+### EPG timeline guide shows 0 programmes after restart
+
+On startup, IPTV Hub loads channels and EPG data from the previous session's database. If EPG feeds are within their minimum download interval, they are skipped and the existing programme data is preserved. The guide will populate within a few seconds of the startup refresh completing.
+
+If the guide remains empty after waiting:
+1. Open the **EPG** page → find your server card
+2. Click the **download** button on each configured EPG feed to force an immediate download
+3. The programme count badge (upper-right of the server card) should increase once the download completes
+
+### HDHomeRun channels have no EPG data
+
+HDHomeRun devices do not supply EPG data through their lineup API. To add programme guide data:
+1. Go to **EPG** → find your server card
+2. Add an XMLTV feed URL that covers your OTA market (many free options at `epgshare01.online` or `SchedulesDirect`)
+3. Use **Channel Maps** to link the feed's channel IDs to the `tvg-id` values assigned to your HDHomeRun channels
+4. Click **Save Changes**, then download the feed
+
+### `/api/status` returns 401 from remote checks
+
+This is expected with current hardening rules. Unauthenticated status access is restricted; remote callers should authenticate via the management session model or run health checks from local host context.
 
 ### Service won't start after reboot (Windows Service install)
 

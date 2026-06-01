@@ -1,17 +1,32 @@
 services:
   iptv-hub:
-    build: .
+    # Default to media runtime so ffmpeg/yt-dlp-dependent features work out of the box.
+    build:
+      context: .
+      dockerfile: Dockerfile.media
+    # To evaluate a smaller Alpine runtime variant, switch to:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.alpine
     ports:
       - "5000:5000"   # Management UI + embedded React app
-      - "8080:8080"   # Default IPTV streaming server
+      - "8070:8070"   # Default IPTV streaming server (internal port must match — set server Port to 8070 in the UI)
       # If you add more IPTV servers in the UI on different ports, expose them here:
-      # - "8081:8081"
+      # - "8071:8071"
     volumes:
       - iptv-data:/app/data   # LiteDB database files (management.db, per-server DBs)
       - iptv-logs:/app/logs   # NLog rotating log files
     environment:
       - IptvHub__ManagementApi__Host=http://0.0.0.0:5000
+      - IptvHub__Epg__XmltvHostIp=192.168.50.18
+      - IptvHub__Data__CompactWhenLargerThanMb=0
       - ASPNETCORE_HTTP_PORTS=   # suppress the default 8080 set by the base image
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5000/api/status >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
 volumes:

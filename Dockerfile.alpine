@@ -1,0 +1,60 @@
+# ── Stage 1: Build React frontend ──────────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /repo
+
+COPY src/IptvHub.Web/package.json src/IptvHub.Web/package-lock.json \
+     src/IptvHub.Web/
+
+WORKDIR /repo/src/IptvHub.Web
+RUN npm ci
+
+COPY src/IptvHub.Web/ .
+RUN npm run build
+
+
+# ── Stage 2: Build .NET backend ────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:8.0-alpine AS backend-builder
+
+WORKDIR /repo
+
+COPY IptvHub.sln .
+COPY src/IptvHub.Service/IptvHub.Service.csproj src/IptvHub.Service/
+RUN dotnet restore src/IptvHub.Service/IptvHub.Service.csproj
+
+COPY src/IptvHub.Service/ src/IptvHub.Service/
+COPY --from=frontend-builder /repo/src/IptvHub.Service/wwwroot \
+     src/IptvHub.Service/wwwroot/
+
+RUN dotnet publish src/IptvHub.Service/IptvHub.Service.csproj \
+    -c Release \
+    -o /out \
+    --no-restore
+
+
+# ── Stage 3: Runtime image (Alpine evaluation) ────────────────────────────────
+FROM mcr.microsoft.com/dotnet/aspnet:8.0-alpine AS runtime
+
+WORKDIR /app
+
+RUN apk add --no-cache curl icu-libs tzdata
+
+COPY --from=backend-builder /out .
+
+RUN addgroup -S app && adduser -S -G app -u 1000 app \
+    && mkdir -p /app/data /app/logs \
+    && chown -R app:app /app \
+    && chmod -R 0775 /app/data /app/logs
+
+EXPOSE 5000
+EXPOSE 8080
+
+ENV IptvHub__ManagementApi__Host=http://0.0.0.0:5000
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:5000/api/status || exit 1
+
+USER app
+
+ENTRYPOINT ["dotnet", "IptvHub.Service.dll"]
